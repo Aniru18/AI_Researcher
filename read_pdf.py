@@ -34,4 +34,3 @@ def read_pdf(url: str) -> str:
     except Exception as e:
         print(f"An error occurred while reading the PDF: {e}")
         raise
-print(read_pdf("https://arxiv.org/pdf/2601.23281v1"))
