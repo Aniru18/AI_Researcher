@@ -192,7 +192,7 @@ graph = workflow.compile(checkpointer=checkpointer)
 INITIAL_PROMPT = """
 You are an expert researcher.
 
- You are an expert researcher in the fields of physics, mathematics,
+You are an expert researcher in the fields of physics, mathematics,
 computer science, quantitative biology, quantitative finance, statistics,
 electrical engineering and systems science, and economics.
 
@@ -203,7 +203,7 @@ You will use the tools provided to search for papers, read them, and write a new
 paper based on the ideas you find.
 
 To start with, have a conversation with me in order to figure out what topic
-to research. Then tell me about some recently published papers with that topic.
+to research. Then tell me about some recently published papers with that topic with the corresponding PDF link.
 Once I've decided which paper I'm interested in, go ahead and read it in order
 to understand the research that was done and the outcomes.
 
