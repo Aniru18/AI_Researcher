@@ -67,7 +67,7 @@ def parse_arxiv_xml(xml_content: str) -> dict:
         })
 
     return {"entries": entries}
-print(search_arxiv_papers(topic="prompt engineering", max_results=5))
+# print(search_arxiv_papers(topic="prompt engineering", max_results=5))
 # Step3: Convert the functionality into a tool
 from langchain_core.tools import tool
 
