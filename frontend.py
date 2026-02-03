@@ -54,7 +54,181 @@
 #     if full_response:
 #         st.session_state.chat_history.append({"role": "assistant", "content": full_response})
 
+#..........................second version...............................................
+# import streamlit as st
+# import logging
+# import re
+# from pathlib import Path
+# from typing import Optional
 
+# from pydantic import BaseModel
+# from langchain_core.messages import AIMessage
+
+# from ai_researcher import INITIAL_PROMPT, graph, config
+
+
+# # ===============================
+# # Logging setup
+# # ===============================
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
+
+
+# # ===============================
+# # Streamlit App Config
+# # ===============================
+# st.set_page_config(
+#     page_title="Research AI Agent",
+#     page_icon="📄",
+#     layout="wide"
+# )
+
+# st.title("📄 Research AI Agent")
+
+
+# # ===============================
+# # Pydantic Response Schema
+# # ===============================
+# class AgentResponse(BaseModel):
+#     text: str
+#     status: Optional[str] = None
+#     pdf_path: Optional[str] = None
+
+
+# # ===============================
+# # Gemini → Pydantic Normalizer
+# # ===============================
+# def parse_agent_message(message: AIMessage) -> AgentResponse:
+#     """
+#     Normalize Gemini / LangChain message into a structured AgentResponse
+#     """
+#     content = message.content
+#     text = ""
+
+#     # Gemini structured content
+#     if isinstance(content, list):
+#         text = "".join(
+#             part.get("text", "")
+#             for part in content
+#             if part.get("type") == "text"
+#         )
+
+#     # Normal string content
+#     elif isinstance(content, str):
+#         text = content
+
+#     text = text.strip()
+
+#     # Detect PDF path (Windows-friendly)
+#     pdf_path = None
+#     match = re.search(r"[A-Z]:\\.*?\.pdf", text)
+#     if match:
+#         pdf_path = match.group(0)
+
+#     # Detect simple status
+#     status = None
+#     lowered = text.lower()
+#     if "re-render" in lowered or "regenerate" in lowered:
+#         status = "rerendering_pdf"
+#     elif pdf_path:
+#         status = "pdf_generated"
+
+#     return AgentResponse(
+#         text=text,
+#         status=status,
+#         pdf_path=pdf_path
+#     )
+
+
+# # ===============================
+# # Session State Init
+# # ===============================
+# if "chat_history" not in st.session_state:
+#     st.session_state.chat_history = []
+#     logger.info("Chat history initialized")
+
+# if "pdf_path" not in st.session_state:
+#     st.session_state.pdf_path = None
+
+
+# # ===============================
+# # Chat Input
+# # ===============================
+# user_input = st.chat_input("What research topic would you like to explore?")
+
+
+# # ===============================
+# # Main Chat Flow
+# # ===============================
+# if user_input:
+#     logger.info(f"User input: {user_input}")
+
+#     # Store user message
+#     st.session_state.chat_history.append(
+#         {"role": "user", "content": user_input}
+#     )
+
+#     st.chat_message("user").write(user_input)
+
+#     # Prepare agent input
+#     chat_input = {
+#         "messages": [
+#             {"role": "system", "content": INITIAL_PROMPT}
+#         ] + st.session_state.chat_history
+#     }
+
+#     logger.info("Starting agent stream")
+
+#     # Assistant UI placeholder (smooth streaming)
+#     assistant_placeholder = st.chat_message("assistant").empty()
+#     full_response_text = ""
+
+#     # Stream agent output
+#     for s in graph.stream(chat_input, config, stream_mode="values"):
+#         message = s["messages"][-1]
+
+#         # Log tool calls only (no UI spam)
+#         if getattr(message, "tool_calls", None):
+#             for tool_call in message.tool_calls:
+#                 logger.info(f"Tool called: {tool_call['name']}")
+
+#         # Handle assistant messages
+#         if isinstance(message, AIMessage) and message.content:
+#             response = parse_agent_message(message)
+
+#             if response.text:
+#                 full_response_text += response.text + "\n\n"
+#                 assistant_placeholder.write(full_response_text)
+
+#             # Handle PDF output
+#             if response.pdf_path:
+#                 st.session_state.pdf_path = response.pdf_path
+
+#     # Persist assistant response
+#     if full_response_text.strip():
+#         st.session_state.chat_history.append(
+#             {"role": "assistant", "content": full_response_text.strip()}
+#         )
+
+
+# # ===============================
+# # PDF Download Section
+# # ===============================
+# if st.session_state.pdf_path:
+#     pdf_file = Path(st.session_state.pdf_path)
+
+#     if pdf_file.exists():
+#         st.divider()
+#         st.success("📄 Research paper generated successfully")
+
+#         with open(pdf_file, "rb") as f:
+#             st.download_button(
+#                 label="⬇️ Download PDF",
+#                 data=f,
+#                 file_name=pdf_file.name,
+#                 mime="application/pdf"
+#             )
+#............................third version............................................
 import streamlit as st
 import logging
 import re
@@ -68,14 +242,14 @@ from ai_researcher import INITIAL_PROMPT, graph, config
 
 
 # ===============================
-# Logging setup
+# Logging (terminal only)
 # ===============================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 # ===============================
-# Streamlit App Config
+# Streamlit Config
 # ===============================
 st.set_page_config(
     page_title="Research AI Agent",
@@ -96,42 +270,60 @@ class AgentResponse(BaseModel):
 
 
 # ===============================
-# Gemini → Pydantic Normalizer
+# Helper: detect tool failure
+# ===============================
+def is_tool_failure(content) -> bool:
+    """
+    Detect structured tool failure responses like:
+    { success: false, error: "...", tool: "render_latex_pdf" }
+    """
+    return (
+        isinstance(content, dict)
+        and content.get("success") is False
+        and "error" in content
+    )
+
+
+# ===============================
+# Gemini → Structured Parser
 # ===============================
 def parse_agent_message(message: AIMessage) -> AgentResponse:
     """
-    Normalize Gemini / LangChain message into a structured AgentResponse
+    Robust parser for Gemini / LangChain messages.
+    Handles:
+    - list[dict]
+    - list[str]
+    - list[dict | str]
+    - plain string
     """
     content = message.content
-    text = ""
+    text_parts: list[str] = []
 
-    # Gemini structured content
     if isinstance(content, list):
-        text = "".join(
-            part.get("text", "")
-            for part in content
-            if part.get("type") == "text"
-        )
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text_parts.append(part.get("text", ""))
+            elif isinstance(part, str):
+                text_parts.append(part)
 
-    # Normal string content
     elif isinstance(content, str):
-        text = content
+        text_parts.append(content)
 
-    text = text.strip()
+    text = "".join(text_parts).strip()
 
-    # Detect PDF path (Windows-friendly)
+    # Detect PDF path (Windows-safe)
     pdf_path = None
     match = re.search(r"[A-Z]:\\.*?\.pdf", text)
     if match:
         pdf_path = match.group(0)
 
-    # Detect simple status
+    # Optional status inference
     status = None
     lowered = text.lower()
-    if "re-render" in lowered or "regenerate" in lowered:
-        status = "rerendering_pdf"
-    elif pdf_path:
+    if pdf_path:
         status = "pdf_generated"
+    elif "re-render" in lowered or "regenerate" in lowered:
+        status = "rerendering_pdf"
 
     return AgentResponse(
         text=text,
@@ -167,7 +359,6 @@ if user_input:
     st.session_state.chat_history.append(
         {"role": "user", "content": user_input}
     )
-
     st.chat_message("user").write(user_input)
 
     # Prepare agent input
@@ -179,20 +370,36 @@ if user_input:
 
     logger.info("Starting agent stream")
 
-    # Assistant UI placeholder (smooth streaming)
     assistant_placeholder = st.chat_message("assistant").empty()
     full_response_text = ""
 
-    # Stream agent output
     for s in graph.stream(chat_input, config, stream_mode="values"):
         message = s["messages"][-1]
+        content = message.content
 
-        # Log tool calls only (no UI spam)
+        # --------------------------------
+        # Tool failure handling (IMPORTANT)
+        # --------------------------------
+        if is_tool_failure(content):
+            logger.error(
+                f"PDF generation failed: {content.get('error')}"
+            )
+
+            assistant_placeholder.info(
+                "⚠️ PDF generation failed. Retrying with fixes…"
+            )
+            continue  # let the agent retry silently
+
+        # --------------------------------
+        # Tool call logging (terminal only)
+        # --------------------------------
         if getattr(message, "tool_calls", None):
             for tool_call in message.tool_calls:
                 logger.info(f"Tool called: {tool_call['name']}")
 
-        # Handle assistant messages
+        # --------------------------------
+        # Assistant message handling
+        # --------------------------------
         if isinstance(message, AIMessage) and message.content:
             response = parse_agent_message(message)
 
@@ -200,7 +407,6 @@ if user_input:
                 full_response_text += response.text + "\n\n"
                 assistant_placeholder.write(full_response_text)
 
-            # Handle PDF output
             if response.pdf_path:
                 st.session_state.pdf_path = response.pdf_path
 
